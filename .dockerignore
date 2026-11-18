@@ -1,0 +1,9 @@
+*
+!Dockerfile
+!models.json
+!opencode.json
+!scripts/
+!scripts/**
+!fixtures/
+!fixtures/**
+**/__pycache__

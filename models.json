@@ -1,0 +1,23 @@
+{
+  "llama": {
+    "repo": "unsloth/Qwen3.8-27B-GGUF",
+    "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+    "file": "Qwen3.8-27B-UD-Q4_K_M.gguf",
+    "bytes": 16464440224,
+    "sha256": "322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482"
+  },
+  "llama-mtp": {
+    "repo": "unsloth/Qwen3.8-27B-GGUF",
+    "revision": "4ca720788d1e01f1bff70c033e0d0028fd02e502",
+    "file": "MTP/mtp-Qwen3.8-27B-Q4_0.gguf",
+    "bytes": 1369590656,
+    "sha256": "50d9ce5a6da381bbcfb31061cf73df94a90e6faf8efeddee379a9cb8f1501c6e"
+  },
+  "turbo": {
+    "repo": "neroued/Qwen3.8-27B-nvfp4-NInfer",
+    "revision": "0190293051af2c578f2f3d5264cf2bcd9af051c2",
+    "file": "qwen3_8_27b_nvfp4.ninfer",
+    "bytes": 23719715844,
+    "sha256": "74d2c57145e6ff11d1d2faa79594477f9bc903a611af1fb20218189fbbb77d82"
+  }
+}
