@@ -7,6 +7,14 @@ host="${HOST:-127.0.0.1}"
 port="${PORT:-8080}"
 context="${CONTEXT_SIZE:-32768}"
 model_id="${MODEL_ID:-qwen3.8-27b}"
+[[ "$context" =~ ^[1-9][0-9]*$ ]] && (( context <= 262144 )) || {
+  printf 'CONTEXT_SIZE must be an integer from 1 to 262144.\n' >&2; exit 2;
+}
+# Keep the 128K profile bounded without reducing weight/KV precision or context.
+prefill=2048 ubatch=512 device_slots=1 checkpoints=32 cache_ram=8192
+if (( context >= 131072 )); then
+  prefill=1024 ubatch=256 device_slots=0 checkpoints=4 cache_ram=2048
+fi
 mkdir -p "$data"/{logs,results}
 # The same lock protects foreground launches and automated comparisons.
 exec 9>"$data/inference.lock"
@@ -27,7 +35,9 @@ case "$backend" in
       --host "$host" --port "$port" --ctx-size "$context" --parallel 1 \
       --n-gpu-layers all --fit off --flash-attn on \
       --cache-type-k q8_0 --cache-type-v q8_0 \
-      --batch-size 2048 --ubatch-size 512 --jinja --metrics \
+      --batch-size "${BATCH_SIZE:-2048}" --ubatch-size "${UBATCH_SIZE:-$ubatch}" \
+      --ctx-checkpoints "${CTX_CHECKPOINTS:-$checkpoints}" --cache-ram "${CACHE_RAM_MIB:-$cache_ram}" \
+      --jinja --metrics \
       --reasoning-format deepseek --reasoning-budget "${THINKING_BUDGET:-1024}" \
       --reasoning-preserve --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0 \
       "${auth[@]}" "${spec[@]}" "$@"
@@ -42,9 +52,10 @@ case "$backend" in
       spec=(--spec dflash2 --draft-tokens "${DRAFT_TOKENS:-7}" --lm-head-draft)
     fi
     exec ninfer-serve "$model" --model-id "$model_id" --host "$host" --port "$port" \
-      --max-context "$context" --kv-capacity "$context" --max-concurrency 1 \
-      --kv-dtype int8 --prefill-chunk 2048 --device-state-slots 1 \
-      --host-state-slots 2 --host-kv-mib 2048 --preserve-thinking \
+      --max-context "$context" --kv-capacity "${KV_CAPACITY:-auto}" --max-concurrency 1 \
+      --kv-dtype int8 --prefill-chunk "${PREFILL_CHUNK:-$prefill}" \
+      --device-state-slots "${DEVICE_STATE_SLOTS:-$device_slots}" \
+      --host-state-slots "${HOST_STATE_SLOTS:-2}" --host-kv-mib "${HOST_KV_MIB:-2048}" --preserve-thinking \
       --default-max-tokens 4096 --default-thinking-budget "${THINKING_BUDGET:-1024}" \
       --request-log-jsonl "$data/logs/ninfer-requests.jsonl" \
       "${auth[@]}" "${spec[@]}" "$@"

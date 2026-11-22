@@ -1,7 +1,8 @@
 # Qwen3.8-27B · V100 32 GB · Vast.ai
 
 One image with **llama.cpp**, **ninfer-v100-turbo**, and **OpenCode 2.2.6**.
-Pinned engines/models, verified downloads, text-only, 32K context, one request.
+Pinned engines/models, verified downloads, text-only, one request. Start at 32K
+or use the memory-tuned 128K profile below.
 Turbo is worth testing, but its 260 tok/s headline is a synthetic ceiling.
 See [research, compatibility details and sources](RESEARCH.md).
 
@@ -16,6 +17,11 @@ docker push YOUR_DOCKERHUB_USER/qwen-v100:1
 
 Allow **25 GB free build disk** and **20–40+ minutes** for CUDA compilation.
 Use `BUILD_JOBS=1` if memory is tight; BuildKit caches interrupted compilation.
+The llama.cpp API server is built without its optional embedded browser UI.
+If an earlier build failed with `UI: missing required asset(s)`, rerun the same
+build command with this Dockerfile: it clears only cached UI assets and reuses
+compiled CUDA/C++ objects. Keep the build arguments the same; no cache prune
+or `--no-cache` is needed.
 
 Create a Vast custom template with your image, **SSH launch mode**, and:
 
@@ -60,7 +66,32 @@ Tool failures are reported without blocking speed measurements.
 complete stacks, not identical quantization or isolated kernel speed.
 Try `DRAFT_TOKENS=1 compare.py llama-mtp turbo` to compare another MTP window.
 
-## 3. Test OpenCode
+## 3. Qualify 128K context
+
+In **each terminal** set `export CONTEXT_SIZE=131072`. The launcher automatically
+reduces prefill buffers and extra GPU checkpoints at this size. Turbo uses INT8
+KV and automatic capacity planning with **1 GiB startup headroom**. llama.cpp
+keeps q8_0 KV and full GPU offload. Choose **64 GB host RAM** for this profile.
+
+```bash
+# Terminal 1: start one engine and wait for readiness
+export CONTEXT_SIZE=131072
+serve.sh turbo                     # repeat later with llama / llama-mtp
+
+# Terminal 2: same exports, then stress almost the entire context
+export CONTEXT_SIZE=131072
+context-check.py --out /workspace/results/turbo-128k
+```
+
+The check uses server-side token counting, a roughly 126.7K-token prompt and
+4,096 output tokens, twice. It records sampled GPU memory and only passes when
+both outputs hit their token budget and free VRAM stays at least **1,024 MiB**.
+Early EOS is inconclusive. Inspect `report.json`; then run the normal OpenCode
+task. This check takes much longer than the short-prompt speed benchmark.
+128K is supported by the architecture and plausible on this card, but requires
+qualification on your actual rental; sampling cannot prove every transient peak.
+
+## 4. Test OpenCode
 
 In one SSH terminal, start **one** backend and wait for readiness:
 
@@ -93,9 +124,11 @@ low thinking effort and a 4,096-token output limit. Config lives at
 - Stop foreground servers with **Ctrl-C** before comparisons; an exclusive lock
   prevents two launchers sharing this card.
 - OOM: try `CONTEXT_SIZE=16384 serve.sh turbo`; use the same `CONTEXT_SIZE` for
-  OpenCode/comparisons. Turbo can also use `--device-state-slots 0`.
+  OpenCode/comparisons. To retain 128K, first try `PREFILL_CHUNK=512 serve.sh turbo`,
+  then `serve.sh turbo-nospec`. See [memory tradeoffs](RESEARCH.md#128k-memory-budget-and-oom-controls).
 - `serve.sh` forwards extra engine flags. `DRAFT_TOKENS`, `THINKING_BUDGET`,
-  `PORT` and `DATA_DIR` are configurable.
+  `PORT` and `DATA_DIR` are configurable. `PREFILL_CHUNK`, `DEVICE_STATE_SLOTS`,
+  `UBATCH_SIZE`, `CTX_CHECKPOINTS` and `CACHE_RAM_MIB` override memory-profile defaults.
 - Local GPU Docker: `docker run --rm -it --gpus all -v qwen-data:/workspace YOUR_DOCKERHUB_USER/qwen-v100:1 bash`.
 - API is loopback-only by default. External access needs `HOST=0.0.0.0`,
   `API_KEY=your-secret`, and published port 8080; clients use `/v1`. Vast's

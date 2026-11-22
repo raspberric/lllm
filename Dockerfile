@@ -14,13 +14,16 @@ ARG LLAMA_REF=e95426f16982054c379ca7bdc8186996dd22f0fe
 RUN mkdir /src && curl -fL --retry 3 \
     "https://github.com/ggml-org/llama.cpp/archive/${LLAMA_REF}.tar.gz" \
     | tar -xz --strip-components=1 -C /src
+# Drop incomplete downloaded UI assets; retain CUDA/C++ objects for resuming.
 RUN --mount=type=cache,id=qwen-v100-llama-${LLAMA_REF},target=/build \
-    cmake -S /src -B /build -G Ninja \
+    cmake -E rm -rf /build/tools/ui/dist /build/tools/ui/.ui-stamp /build/tools/ui/.ui-embed.sha256 \
+    && cmake -S /src -B /build -G Ninja \
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_CUDA_ARCHITECTURES=70 \
     -DCMAKE_CXX_COMPILER=g++-14 -DCMAKE_CUDA_HOST_COMPILER=g++-14 \
     -DGGML_CUDA=ON -DGGML_CUDA_NCCL=OFF -DGGML_NATIVE=OFF -DBUILD_SHARED_LIBS=OFF \
     '-DGGML_CUDA_FA_QUANTS=f16-f16;q8_0-q8_0' \
     -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
+    -DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF \
     -DLLAMA_OPENSSL=ON \
     && cmake --build /build --parallel ${BUILD_JOBS} --target llama-server \
     && mkdir -p /out && cp /build/bin/llama-server /out/ \

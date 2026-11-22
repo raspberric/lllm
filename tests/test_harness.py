@@ -32,6 +32,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path == "/v1/messages/count_tokens":
+            count = len(body["messages"][0]["content"]) // 4 + 8
+            if count > self.server.context_tokens:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(b'{"error":{"message":"prepared prompt exceeds context"}}')
+                return
+            self.send_json({"input_tokens": count})
+            return
+        if self.path == "/v1/messages":
+            early = getattr(self.server, "early_eos", False)
+            self.send_json({"usage": {"input_tokens": len(body["messages"][0]["content"]) // 4 + 8,
+                                      "output_tokens": 1 if early else body["max_tokens"]},
+                            "stop_reason": "end_turn" if early else "max_tokens"})
+            return
         if not body.get("stream"):
             self.send_json({"choices": [{"message": {
                 "role": "assistant", "content": None,
@@ -127,6 +142,58 @@ class HarnessTest(unittest.TestCase):
                                     env=self.env, capture_output=True, text=True, timeout=5)
         self.assertEqual(result.returncode, 1)
         self.assertIn("Another inference server", result.stderr)
+
+    def test_128k_launch_profile_and_explicit_overrides(self):
+        printer = f"#!{sys.executable}\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n"
+        for binary in ["llama-server", "ninfer-serve"]:
+            (self.directory / binary).write_text(printer)
+
+        def launch(backend, **environment):
+            result = subprocess.run(["bash", str(ROOT / "scripts/serve.sh"), backend],
+                                    env={**self.env, "CONTEXT_SIZE": "131072", **environment},
+                                    capture_output=True, text=True, timeout=5, check=True)
+            args = json.loads(result.stdout)
+            return {arg: args[index + 1] for index, arg in enumerate(args[:-1]) if arg.startswith("--")}
+
+        turbo = launch("turbo")
+        self.assertEqual(turbo["--max-context"], "131072")
+        self.assertEqual(turbo["--kv-capacity"], "auto")
+        self.assertEqual(turbo["--device-state-slots"], "0")
+        self.assertEqual(turbo["--prefill-chunk"], "1024")
+        self.assertEqual(turbo["--kv-dtype"], "int8")
+        llama = launch("llama")
+        self.assertEqual(llama["--ctx-size"], "131072")
+        self.assertEqual(llama["--ubatch-size"], "256")
+        self.assertEqual(llama["--ctx-checkpoints"], "4")
+        overridden = launch("turbo", DEVICE_STATE_SLOTS="1", PREFILL_CHUNK="512")
+        self.assertEqual(overridden["--device-state-slots"], "1")
+        self.assertEqual(overridden["--prefill-chunk"], "512")
+
+    def test_context_check_counts_full_budget_and_rejects_early_eos(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server.context_tokens = 2048
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            for early, free_mib in [(False, 2048), (True, 2048), (False, 512)]:
+                (self.directory / "nvidia-smi").write_text(
+                    f"#!{sys.executable}\nprint('{free_mib}, 1024')\n")
+                server.early_eos = early
+                expected = not early and free_mib >= 1024
+                out = self.directory / f"{early}-{free_mib}"
+                result = subprocess.run([
+                    sys.executable, str(ROOT / "scripts/context-check.py"), "--context", "2048",
+                    "--output-tokens", "64", "--base-url", f"http://127.0.0.1:{server.server_port}",
+                    "--out", str(out)], env=self.env, capture_output=True, text=True, timeout=15)
+                report = json.loads((out / "report.json").read_text())
+                self.assertEqual(result.returncode == 0, expected, result.stdout + result.stderr)
+                self.assertEqual(report["passed"], expected)
+                self.assertGreaterEqual(report["counted_prompt_tokens"], 1600)
+                self.assertEqual(len(report["runs"]), 2)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join()
 
 
 if __name__ == "__main__":

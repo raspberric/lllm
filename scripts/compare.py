@@ -51,7 +51,10 @@ def main():
     metadata = {"arguments": vars(args), "models": json.loads((root / "models.json").read_text()),
                 "versions": {p.name: p.read_text() for p in root.glob("*-version.txt")},
                 "environment": {k: os.environ[k] for k in
-                                ["CONTEXT_SIZE", "DRAFT_TOKENS", "THINKING_BUDGET", "HOST", "PORT"]
+                                ["CONTEXT_SIZE", "DRAFT_TOKENS", "THINKING_BUDGET", "HOST", "PORT",
+                                 "KV_CAPACITY", "PREFILL_CHUNK", "DEVICE_STATE_SLOTS",
+                                 "HOST_STATE_SLOTS", "HOST_KV_MIB", "BATCH_SIZE", "UBATCH_SIZE",
+                                 "CTX_CHECKPOINTS", "CACHE_RAM_MIB"]
                                 if k in os.environ}}
     (campaign / "environment.json").write_text(json.dumps(metadata, indent=2) + "\n")
     signal.signal(signal.SIGTERM, interrupted)
